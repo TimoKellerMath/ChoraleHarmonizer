@@ -1,0 +1,5 @@
+torch>=2.1
+transformers>=4.46
+datasets>=2.14
+music21>=9.1
+numpy>=1.24
