@@ -1,0 +1,40 @@
+{
+  "_doc": [
+    "Stil-Konfiguration für die Generierung (siehe style_model.py).",
+    "Beide Terme bewerten |NLL - Ziel| statt die NLL zu minimieren:",
+    "Ziel = Bachs eigener Median (target_nll: null) -> Bach-typische Kühnheit.",
+    "enabled: false oder weight: 0 schaltet einen Term ab; fehlt diese Datei,",
+    "sind beide Terme aus. tolerance = straffreier Bereich um das Ziel.",
+    "Presets verschieben die Ziele (target_delta, in Nats: positiv = kühner)",
+    "und dürfen Sampling-Parameter überschreiben (temperature, top_p,",
+    "underscore_bias). Aufruf: python chorale_harmonizer.py --presets kuehn"
+  ],
+  "chord_lm": {
+    "enabled": true,
+    "weight": 0.15,
+    "target_nll": null,
+    "tolerance": 0.15
+  },
+  "texture": {
+    "enabled": true,
+    "weight": 0.15,
+    "target_nll": null,
+    "tolerance": 0.04
+  },
+  "presets": {
+    "konservativ": {
+      "chord_target_delta": -0.25,
+      "texture_target_delta": -0.03,
+      "temperature": 0.65,
+      "top_p": 0.9
+    },
+    "ausgewogen": {},
+    "kuehn": {
+      "chord_target_delta": 0.35,
+      "texture_target_delta": 0.05,
+      "temperature": 0.85,
+      "top_p": 0.95,
+      "underscore_bias": -0.2
+    }
+  }
+}

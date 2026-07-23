@@ -754,11 +754,21 @@ class ChoraleHarmonizer:
                 num_return_sequences=n_seq,
             )
 
+        # Stil-Terme (Harmonik-Bigramm, Textur): Abweichung vom Bach-typischen
+        # Überraschungsniveau, konfiguriert/abschaltbar in style_config.json
+        try:
+            from style_model import get_style_scorer
+            style = get_style_scorer()
+            if not style.active:
+                style = None
+        except (FileNotFoundError, KeyError):
+            style = None  # kein Datensatz / keine Statistik: Stil-Terme aus
+
         def score(cands):
             """Globalziel je Kandidat über den bereits erzeugten Teil:
             mittlere A/T/B-Log-Likelihood − RULE_PENALTY_WEIGHT × gewichtete
-            Regelverstöße pro 16tel. Gemeinsame Präfixe kürzen sich beim
-            Vergleich heraus."""
+            Regelverstöße pro 16tel − Stil-Abweichung (style_model).
+            Gemeinsame Präfixe kürzen sich beim Vergleich heraus."""
             n = cands.size(0)
             out = model(
                 input_ids=input_ids.expand(n, -1),
@@ -770,13 +780,20 @@ class ChoraleHarmonizer:
             length = cands.size(1) - 1
             atb = [p for p in atb_positions_all if p < length]
             lik = token_lp[:, atb].mean(dim=1) if atb else token_lp.mean(dim=1)
+            token_lists = [tokenizer.decode(c, skip_special_tokens=True).split()
+                           for c in cands]
             pens = torch.tensor(
-                [rule_violation_score(tokenizer.decode(c, skip_special_tokens=True).split())
-                 for c in cands],
+                [rule_violation_score(t) for t in token_lists],
                 dtype=lik.dtype, device=lik.device) / num_steps
+            total = lik
             if C.RULE_PENALTY_WEIGHT > 0.0:
-                return lik - C.RULE_PENALTY_WEIGHT * pens, pens
-            return lik, pens
+                total = total - C.RULE_PENALTY_WEIGHT * pens
+            if style is not None:
+                stil = torch.tensor(
+                    [style.penalty(t, sequence) for t in token_lists],
+                    dtype=lik.dtype, device=lik.device)
+                total = total - stil
+            return total, pens
 
         if C.GEN_CANDIDATES <= 1 or not slot_map or total_len == 0:
             best = gen(torch.tensor([start_id], device=model.device), total_len, 1)[0]
@@ -826,41 +843,51 @@ class ChoraleHarmonizer:
         return tokenizer.decode(best, skip_special_tokens=True).strip()
 
 
-def write_test_outputs(harmonizer, test_data, output_dir=C.OUTPUT_DIR):
-    """Harmonisiert die Testchoräle und exportiert Bach-Original und
-    ChoraleHarmonizer-Fassung als MIDI + MusicXML."""
-    from pathlib import Path
-
+def _export(src, seq, path):
     from bach_chorales import output_chorale
+    if C.NUM_VOICES > 2:
+        # Format v2: Sopran-Slot aus dem Target entfernen (er steckt
+        # schon in src und würde sonst als eigene Stimme exportiert)
+        seq = strip_soprano_slots(seq)
+    elif seq.find(';') == -1:
+        seq = seq.replace(' ', ' ; ')
+    output_chorale(src, seq, path)
+
+
+def write_test_outputs(harmonizer, pairs, output_dir=C.OUTPUT_DIR, presets=None):
+    """Harmonisiert Choräle (Originaltonart-Paare) und exportiert Bach-Original
+    und ChoraleHarmonizer-Fassung(en) als MIDI + MusicXML.
+
+    presets: Liste von Stil-Preset-Namen aus style_config.json (z.B.
+    ['konservativ', 'kuehn']) — je Choral entsteht eine Fassung pro Preset,
+    mit Preset-Suffix im Dateinamen. None/[] = eine Fassung ohne Preset."""
+    from pathlib import Path
 
     print(f"\n{'#' * 80}")
     print("TESTMATERIAL")
     print(f"{'#' * 80}\n")
 
     Path(output_dir).mkdir(parents=True, exist_ok=True)
+    preset_list = list(presets) if presets else [None]
 
-    for i, (src, tgt) in enumerate(test_data, 1):
-        if i % 12 != 7:  # the 7-th transpose is in the original key
-            continue
+    for i, (src, tgt) in enumerate(pairs, 1):
         print(f"─── BEISPIEL {i} ───")
         print(f"Input:          {src}")
-        print(f"Original:       {tgt}")
-
-        new_output = harmonizer.transform(src)
-        print(f"Neu berechnet:  {new_output}")
-        print()
-
         try:
-            if C.NUM_VOICES > 2:
-                # Format v2: Sopran-Slot aus dem Target entfernen (er steckt
-                # schon in src und würde sonst als eigene Stimme exportiert)
-                tgt_out = strip_soprano_slots(tgt)
-                new_out = strip_soprano_slots(new_output)
-            else:
-                # if only one voice => insert ';' manually
-                tgt_out = tgt.replace(' ', ' ; ') if tgt.find(';') == -1 else tgt
-                new_out = new_output.replace(' ', ' ; ') if new_output.find(';') == -1 else new_output
-            output_chorale(src, tgt_out, output_dir + f"/{i}-Bach")
-            output_chorale(src, new_out, output_dir + f"/{i}-ChoraleHarmonizer")
+            _export(src, tgt, output_dir + f"/{i}-Bach")
         except Exception as e:
             print(e)
+
+        for preset in preset_list:
+            suffix = ''
+            if preset is not None:
+                from style_model import set_preset
+                set_preset(preset)
+                suffix = '-' + preset
+                print(f"  [Preset: {preset}]")
+            new_output = harmonizer.transform(src)
+            try:
+                _export(src, new_output, output_dir + f"/{i}-ChoraleHarmonizer{suffix}")
+            except Exception as e:
+                print(e)
+        print()

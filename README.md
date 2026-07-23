@@ -21,6 +21,9 @@ python bach_chorales.py
 
 # 2. Train (~2-3 h on a consumer GPU) and harmonize the held-out test chorales
 python chorale_harmonizer.py
+
+# More chorales, several stylistic variants per chorale (conservative .. bold)
+python chorale_harmonizer.py --num-chorales 10 --presets konservativ,ausgewogen,kuehn
 ```
 
 Results land in `output/`: for each test chorale `<n>-Bach.{mid,mxl}`
@@ -99,6 +102,25 @@ rather than dogma:
   incident — the cheaper violation is waived instead of double-counted.
   Generic cascades are damped (heaviest violation full, rest half).
 
+**Style engine (`style_model.py`, configured via `style_config.json`).**
+Two corpus statistics complement the rules at reranking time, both
+switchable and requiring no retraining:
+
+- *Harmonic bigrams* — beat-chord progressions (pitch-class sets relative
+  to the tonic, major/minor separately) scored under a bigram model counted
+  from the corpus: implausible functional progressions and harmonic rhythm
+  cost, even when every single voice moves legally.
+- *Texture* — onset probability per voice and metric position: settings
+  that are too static or too busy for Bach's texture cost.
+
+Crucially, both score the **deviation from Bach's typical surprisal level**
+(|NLL − target|), not the NLL itself — minimizing NLL would collapse toward
+"average Bach". The target defaults to Bach's own median and can be shifted
+in `style_config.json`: presets (`konservativ`, `ausgewogen`, `kuehn`) move
+the targets and sampling temperature, so `--presets` generates anything from
+strict textbook settings to harmonizations bolder than Bach's median — while
+staying inside the measured Bach distribution.
+
 ## What's new compared to the reference projects
 
 Both reference implementations are included as submodule-style copies for
@@ -150,7 +172,9 @@ The most useful knobs in `config.py`:
 | `data_prep.py` | dataset loading, splits, tokenization, phrase augmentation, per-voice registers |
 | `training.py` | model construction, weighted loss, metrics, trainer, checkpoint resume |
 | `generation.py` | rule engine, logit processors, constrained search, `ChoraleHarmonizer` |
-| `tests.py` | 31 tests: rules, calibration against Bach, token handling, export |
+| `style_model.py` | harmonic bigram + texture statistics, target-NLL scoring, presets |
+| `style_config.json` | style-term parameters and presets (JSON, hot-editable) |
+| `tests.py` | 35 tests: rules, style calibration against Bach, token handling, export |
 
 ## Results (reproducible)
 

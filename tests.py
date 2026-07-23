@@ -12,6 +12,8 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+C_STYLE_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'style_config.json')
+
 from bach_chorales import output_chorale, trim_trailing_rests
 from generation import (RULE_WEIGHTS, analyze_source, count_rule_violations,
                         count_rule_violations_by_rule, rule_violation_events,
@@ -354,6 +356,64 @@ def test_export_keeps_inner_rests():
             elems = list(part.flatten().notesAndRests)
             assert sum(1 for e in elems if e.isRest) == 1
             assert not elems[-1].isRest
+
+
+# ====== Stilmodelle (Harmonik-Bigramm, Textur) ======
+
+def test_style_chord_extraction():
+    from style_model import beat_chords, parse_key, parse_meter, steps_per_measure
+    assert parse_key("4/4 G:major G4 _") == (7, 'major')
+    assert parse_key("3/4 B-:minor F4 _") == (10, 'minor')
+    assert parse_meter("3/4 G:major G4") == '3/4'
+    assert steps_per_measure('3/4') == 12 and steps_per_measure('4/4') == 16
+    # C-Dur-Dreiklang in C: relative PCs {0,4,7}; zweiter Schlag hält => gleicher Akkord
+    seq = ("C5 G4 E4 C3 ; _ _ _ _ ; _ _ _ _ ; _ _ _ _ ; "
+           "_ _ _ _ ; _ _ _ _ ; _ _ _ _ ; _ _ _ _ ;").split()
+    assert beat_chords(seq, 0) == ['0.4.7', '0.4.7']
+
+
+def test_style_scorer_config():
+    from style_model import StyleScorer
+    # Ausgeschaltet (enabled=false bzw. weight=0) => Penalty exakt 0
+    off = StyleScorer({}, {'chord_lm': {'enabled': False},
+                           'texture': {'enabled': True, 'weight': 0.0}})
+    assert not off.active
+    assert off.penalty("C5 G4 E4 C3 ;".split(), "4/4 C:major C5 _") == 0.0
+    # Unbekanntes Preset -> Fehler mit Liste der verfügbaren
+    s = StyleScorer({}, {'presets': {'kuehn': {}}})
+    try:
+        s.set_preset('wild')
+        raise AssertionError("KeyError erwartet")
+    except KeyError:
+        pass
+
+
+def test_style_presets_defined():
+    import json
+    cfg = json.load(open(C_STYLE_CONFIG))
+    for name in ('konservativ', 'ausgewogen', 'kuehn'):
+        assert name in cfg['presets']
+
+
+def test_style_calibrated_on_bach():
+    """Bachs eigene Sätze müssen unter den Stil-Termen fast straffrei sein."""
+    import json
+    import statistics
+
+    import config as C
+    if not os.path.exists(C.RAW_DATA_FILE):
+        print("  (übersprungen: Datensatz fehlt)")
+        return
+    from style_model import get_style_scorer
+    scorer = get_style_scorer()
+    if not scorer.active:
+        print("  (übersprungen: Stil-Terme deaktiviert)")
+        return
+    data = json.load(open(C.RAW_DATA_FILE))
+    pens = [scorer.penalty(data[i][1].split(), data[i][0])
+            for i in range(6, min(len(data), 720), 12)]
+    assert statistics.median(pens) < 0.02, f"Bach-Stil-Penalty median {statistics.median(pens):.3f}"
+    assert max(pens) < 0.2, f"Bach-Stil-Penalty max {max(pens):.3f}"
 
 
 # ====== Kalibrierung an echtem Bach (nur wenn Datensatz vorhanden) ======

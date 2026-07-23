@@ -10,6 +10,8 @@ TOKENIZER_DIR = "./music_tokenizer"
 DATA_DIR = "./bach_data_cache"
 RAW_DATA_FILE = "bach-chorales/data-3-voices-False-satb-ts-key"  # Format v2.2, erzeugen mit: python bach_chorales.py
 OUTPUT_DIR = "output"
+STYLE_CONFIG_FILE = "style_config.json"          # Stil-Terme + Presets (konservativ..kuehn); Datei weg = Terme aus
+STYLE_STATS_FILE = "bach-chorales/style_stats.json"  # Cache der Harmonik-/Textur-Statistiken (auto-generiert)
 
 # ====== DATEN / TRAINING ======
 NUM_VOICES = 4
